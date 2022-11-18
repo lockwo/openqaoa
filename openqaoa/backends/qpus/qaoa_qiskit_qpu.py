@@ -25,6 +25,8 @@ from ...basebackend import QAOABaseBackendShotBased, QAOABaseBackendCloud, QAOAB
 from ...qaoa_parameters.baseparams import QAOACircuitParams, QAOAVariationalBaseParams
 from ...utilities import flip_counts
 
+from qiskit_ibm_runtime import Estimator
+from qiskit.quantum_info import SparsePauliOp
 
 # add support to perform error mitigation for a future version
 # from qiskit.ignis.mitigation.measurement import (complete_meas_cal,
@@ -225,3 +227,51 @@ class QAOAQiskitQPUBackend(QAOABaseBackendParametric, QAOABaseBackendCloud, QAOA
         Reset self.circuit after performing a computation
         """
         raise NotImplementedError()
+
+class QAOAQiskitRuntimeBackend(QAOAQiskitQPUBackend):
+    def __init__(self,
+                 circuit_params: QAOACircuitParams,
+                 device,
+                 prepend_state: Optional[QuantumCircuit],
+                 append_state: Optional[QuantumCircuit],
+                 init_hadamard: bool,
+                 qubit_layout: List[int] = [],
+                 cvar_alpha: float = 1,
+                 n_shots=1024):
+
+        QAOAQiskitQPUBackend.__init__(self,
+                                          circuit_params,
+                                          device,
+                                          n_shots,
+                                          prepend_state,
+                                          append_state,
+                                          init_hadamard,
+                                          cvar_alpha)
+        QAOABaseBackendCloud.__init__(self, device)
+        
+        self.device = device
+        self.estimator = None
+        self.qiskit_ham = self.convert_to_qiskit_ham(self.circuit_params.cost_hamiltonian)
+
+    def convert_to_qiskit_ham(self, ham): # probably not robust
+        base = ["I" for _ in range(ham.n_qubits)]
+        results = []
+
+        for i in range(len(ham)):
+            temp = base.copy()
+            temp[ham.terms[i].qubit_indices[0]] = "Z"
+            temp[ham.terms[i].qubit_indices[1]] = "Z"
+            temp = ''.join(temp)
+            results.append((temp, ham.coeffs[i]))
+        
+        return SparsePauliOp.from_list(results)
+
+    def expectation(self, params, session) -> float:
+        circuit = self.qaoa_circuit(params) # could improve use of estimator
+        circuit.remove_final_measurements()
+        if self.estimator is None:
+            self.estimator = Estimator(session=session, options=self.device.options) 
+        job = self.estimator.run(circuit, self.qiskit_ham)
+        results = job.result()
+        cost = sum(results.values)
+        return cost
