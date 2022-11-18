@@ -14,12 +14,12 @@
 from typing import Union, Optional, List
 import numpy as np
 
-from ..backends import (QAOAQiskitQPUBackend, QAOAPyQuilQPUBackend, QAOAAWSQPUBackend, 
+from ..backends import (QAOAQiskitQPUBackend, QAOAQiskitRuntimeBackend, QAOAPyQuilQPUBackend, QAOAAWSQPUBackend, 
                         QAOAPyQuilWavefunctionSimulatorBackend,
                         QAOAQiskitBackendStatevecSimulator, QAOAQiskitBackendShotBasedSimulator, 
                         QAOAvectorizedBackendSimulator)
 
-from ..devices import DeviceBase, DeviceLocal, DevicePyquil, DeviceQiskit, DeviceAWS
+from ..devices import DeviceBase, DeviceLocal, DevicePyquil, DeviceQiskit, DeviceAWS, DeviceRuntime
 from ..qaoa_parameters.baseparams import QAOACircuitParams
 from ..basebackend import QuantumCircuitBase, QAOABaseBackend
 
@@ -34,7 +34,8 @@ DEVICE_NAME_TO_OBJECT_MAPPER = {
 DEVICE_ACCESS_OBJECT_MAPPER = {
     DeviceQiskit: QAOAQiskitQPUBackend,
     DevicePyquil: QAOAPyQuilQPUBackend, 
-    DeviceAWS: QAOAAWSQPUBackend
+    DeviceAWS: QAOAAWSQPUBackend,
+    DeviceRuntime: QAOAQiskitRuntimeBackend
 }
 
 
@@ -46,7 +47,9 @@ def _backend_arg_mapper(backend_obj: QAOABaseBackend,
                         active_reset: Optional[bool] = None,
                         rewiring = None,
                         qubit_layout = None, 
-                        disable_qubit_rewiring: Optional[bool] = None):
+                        disable_qubit_rewiring: Optional[bool] = None,
+                        service=None,
+                        options=None):
 
     BACKEND_ARGS_MAPPER = {
         QAOAvectorizedBackendSimulator: {},
@@ -64,7 +67,8 @@ def _backend_arg_mapper(backend_obj: QAOABaseBackend,
                                'qubit_layout':qubit_layout},
         QAOAAWSQPUBackend: {'n_shots': n_shots, 
                             'qubit_layout': qubit_layout, 
-                            'disable_qubit_rewiring': disable_qubit_rewiring}
+                            'disable_qubit_rewiring': disable_qubit_rewiring},
+        QAOAQiskitRuntimeBackend: {'service': service, 'options': options}
     }
 
     final_backend_kwargs = {key: value for key, value in BACKEND_ARGS_MAPPER[backend_obj].items()
