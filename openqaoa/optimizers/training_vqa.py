@@ -39,6 +39,10 @@ from ..qfim import qfim
 import pandas as pd
 from typing import Any
 
+from qiskit_ibm_runtime import Session
+from ..devices import DeviceRuntime
+
+
 def save_parameter(parameter_name: str, parameter_value: Any):
     
     filename = 'oq_saved_info_' + parameter_name
@@ -81,20 +85,24 @@ class OptimizeVQA(ABC):
     Parameters
     ----------
     vqa_object:
-        Backend object of class VQABaseBackend which contains information on the backend used to perform computations, and the VQA circuit.   
+        Backend object of class VQABaseBackend which contains information on the backend used to perform computations, and the VQA circuit.
+    
     variational_params:
-        Object of class QAOAVariationalBaseParams, which contains information on the circuit to be executed,  the type of parametrisation, and the angles of the VQA circuit.   
+        Object of class QAOAVariationalBaseParams, which contains information on the circuit to be executed,  the type of parametrisation, and the angles of the VQA circuit.
+    
     method: 
         which method to use for optimization. Choose a method from the list
         of supported methods by scipy optimize, or from the list of custom gradient optimisers.
+
     optimizer_dict:
         All extra parameters needed for customising the optimising, as a dictionary.
-    Optimizers that usually work the best for quantum optimization problems:
-        #. Gradient free optimizer: BOBYQA, ImFil, Cobyla
-        #. Gradient based optimizer: L-BFGS, ADAM (With parameter shift gradients)
-    
+
+    #Optimizers that usually work the best for quantum optimization problems:
+        1) Gradient free optimizer: BOBYQA, ImFil, Cobyla
+        2) Gradient based optimizer: L-BFGS, ADAM (With parameter shift gradients)
         Note: Adam is not a part of scipy, it will added in a future version
     '''
+
     def __init__(self,
                  vqa_object: Type[VQABaseBackend],
                  variational_params: Type[QAOAVariationalBaseParams],
@@ -177,7 +185,7 @@ class OptimizeVQA(ABC):
 
     # def evaluate_jac(self, x):
 
-    def optimize_this(self, x):
+    def optimize_this(self, x, session=None):
         '''
         A function wrapper to execute the circuit in the backend. This function 
         will be passed as argument to be optimized by scipy optimize.
@@ -197,7 +205,7 @@ class OptimizeVQA(ABC):
         :
             Cost Value evaluated on the declared backed or on the Wavefunction Simulator if specified so
         '''
-        
+        print("in opt")
         log_dict = {}
         log_dict.update({'param_log': deepcopy(x)})
         
@@ -211,14 +219,18 @@ class OptimizeVQA(ABC):
         if self.save_to_csv:
             save_parameter('param_log', deepcopy(x))
         
-        callback_cost = self.vqa.expectation(self.variational_params)
+        if session is not None:
+            callback_cost = self.vqa.expectation(self.variational_params, session)
+        else:
+            callback_cost = self.vqa.expectation(self.variational_params)
         
         log_dict.update({'cost': callback_cost})
         current_eval = self.log.func_evals.best[0]
         current_eval += 1
         log_dict.update({'func_evals': current_eval})
         
-        log_dict.update({'measurement_outcomes': self.vqa.measurement_outcomes})
+        if hasattr(self.vqa, 'measurement_outcomes'):
+            log_dict.update({'measurement_outcomes': self.vqa.measurement_outcomes})
         
         if hasattr(self.vqa, 'log_with_backend') and callable(getattr(self.vqa, 'log_with_backend')):
             self.vqa.log_with_backend(metric_name="measurement_outcomes",
@@ -233,6 +245,7 @@ class OptimizeVQA(ABC):
             
         self.log.log_variables(log_dict)
 
+        print(callback_cost, "end")
         return callback_cost
 
     @abstractmethod
@@ -442,7 +455,7 @@ class ScipyOptimizer(OptimizeVQA):
 
         return string
 
-    def optimize(self):
+    def optimize(self, device):
         '''
         Main method which implements the optimization process using ``scipy.minimize``.
 
@@ -451,7 +464,6 @@ class ScipyOptimizer(OptimizeVQA):
         : 
             Returns self after the optimization process is completed.
         '''
-        
         try:
             if self.method not in ScipyOptimizer.GRADIENT_FREE:
                 if self.hess == None:
@@ -463,7 +475,12 @@ class ScipyOptimizer(OptimizeVQA):
                                       jac=self.jac, hess=self.hess, tol=self.tol,
                                       constraints=self.constraints, options=self.options, bounds=self.bounds)
             else:
-                result = minimize(self.optimize_this, x0=self.initial_params, method=self.method,
+                if isinstance(device, DeviceRuntime):
+                    with Session(service=device.service, backend=device.device_name) as session:
+                        result = minimize(self.optimize_this, x0=self.initial_params, args=(session), method=self.method,
+                                  tol=self.tol, constraints=self.constraints, options=self.options, bounds=self.bounds)
+                else:
+                    result = minimize(self.optimize_this, x0=self.initial_params, method=self.method,
                                   tol=self.tol, constraints=self.constraints, options=self.options, bounds=self.bounds)
         except ConnectionError as e:
             print(e, '\n')
